@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+<meta charset="UTF-8">
+<title>סימולטור אבן נייר מספריים - טורניר עם אנימציות וזיקוקים</title>
+<style>
+body {margin:0; overflow:hidden; font-family:Arial, sans-serif; background:#f0f0f0;}
+#menu {
+  position:absolute;
+  top:10px;
+  left:10px;
+  background:rgba(255,255,255,0.9);
+  padding:10px;
+  border-radius:10px;
+  font-size:16px;
+}
+button {margin-left:5px; cursor:pointer;}
+.creature {position:absolute; font-size:30px; cursor:grab; user-select:none; transition: transform 0.2s;}
+#winnerAnimation {
+  position:absolute;
+  top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  font-size:100px;
+  color:red;
+  display:none;
+  pointer-events:none;
+  z-index:1000;
+}
+.firework {
+  position:absolute;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:yellow;
+  pointer-events:none;
+  opacity:1;
+}
+</style>
+</head>
+<body>
+<div id="menu">
+✂️ מספריים: <span id="scissorsCount">0</span>
+<button onclick="addCreature('scissors')">+</button>
+<button onclick="removeCreature('scissors')">-</button><br>
+📄 נייר: <span id="paperCount">0</span>
+<button onclick="addCreature('paper')">+</button>
+<button onclick="removeCreature('paper')">-</button><br>
+🪨 אבן: <span id="rockCount">0</span>
+<button onclick="addCreature('rock')">+</button>
+<button onclick="removeCreature('rock')">-</button><br>
+<hr>
+<button onclick="resetGame()">איפוס משחק</button>
+<button id="toggleTournamentBtn" onclick="toggleTournament()">הפעל טורניר</button>
+<button onclick="resetTournament()">איפוס טורניר</button>
+<hr>
+<h4>טורניר:</h4>
+✂️ <span id="tScissors">0</span> | 📄 <span id="tPaper">0</span> | 🪨 <span id="tRock">0</span>
+</div>
+
+<div id="winnerAnimation"></div>
+
+<script>
+const emojis = {scissors:"✂️", paper:"📄", rock:"🪨"};
+const creatures = [];
+const baseSpeed = 1.5;
+const initialCount = 20;
+let tournament = {rock:0, paper:0, scissors:0};
+let tournamentActive = false;
+let tournamentOver = false;
+const winningScore = 3;
+let gameLocked = false;
+
+class Creature {
+  constructor(type) {
+    this.type = type;
+    this.el = document.createElement("div");
+    this.el.className = "creature";
+    this.el.textContent = emojis[type];
+    document.body.appendChild(this.el);
+    this.size = 30;
+    this.x = Math.random()*(window.innerWidth-this.size);
+    this.y = Math.random()*(window.innerHeight-this.size);
+    this.vx = (Math.random()-0.5)*baseSpeed*2;
+    this.vy = (Math.random()-0.5)*baseSpeed*2;
+    this.dragging = false;
+
+    this.el.onmousedown = (e)=>{
+      this.dragging = true;
+      this.offsetX = e.offsetX;
+      this.offsetY = e.offsetY;
+    };
+    document.addEventListener("mouseup",()=>this.dragging=false);
+    document.addEventListener("mousemove",(e)=>{
+      if(this.dragging){
+        this.x = Math.min(Math.max(0,e.pageX-this.offsetX), window.innerWidth-this.size);
+        this.y = Math.min(Math.max(0,e.pageY-this.offsetY), window.innerHeight-this.size);
+        this.updatePos();
+      }
+    });
+    this.updatePos();
+  }
+
+  updatePos(){ this.el.style.left=this.x+"px"; this.el.style.top=this.y+"px"; }
+
+  move() {
+    if(this.dragging || gameLocked) return;
+
+    const counts = getCounts();
+    let factor = 1;
+    if(this.type==="rock") factor = Math.max(0.5, initialCount/counts.rock);
+    if(this.type==="paper") factor = Math.max(0.5, initialCount/counts.paper);
+    if(this.type==="scissors") factor = Math.max(0.5, initialCount/counts.scissors);
+
+    for(let other of creatures){
+      if(other===this) continue;
+      if(canBeat(other.type,this.type)) { 
+        let dx=other.x-this.x, dy=other.y-this.y, dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist<150){ this.vx=-dx/dist*factor*baseSpeed; this.vy=-dy/dist*factor*baseSpeed; }
+      } else if(canBeat(this.type,other.type)){
+        let dx=other.x-this.x, dy=other.y-this.y, dist=Math.sqrt(dx*dx+dy*dy);
+        if(dist<150){ this.vx=dx/dist*factor*baseSpeed; this.vy=dy/dist*factor*baseSpeed; }
+      }
+    }
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if(this.x<0) {this.x=0; this.vx*=-1;}
+    if(this.x+this.size>window.innerWidth) {this.x=window.innerWidth-this.size; this.vx*=-1;}
+    if(this.y<0) {this.y=0; this.vy*=-1;}
+    if(this.y+this.size>window.innerHeight) {this.y=window.innerHeight-this.size; this.vy*=-1;}
+
+    this.updatePos();
+  }
+}
+
+function canBeat(a,b){ return (a==="rock"&&b==="scissors")||(a==="scissors"&&b==="paper")||(a==="paper"&&b==="rock"); }
+
+function getCounts(){
+  return {
+    rock:creatures.filter(c=>c.type==="rock").length,
+    paper:creatures.filter(c=>c.type==="paper").length,
+    scissors:creatures.filter(c=>c.type==="scissors").length
+  };
+}
+
+function updateStats(){
+  const counts = getCounts();
+  document.getElementById("rockCount").textContent = counts.rock;
+  document.getElementById("paperCount").textContent = counts.paper;
+  document.getElementById("scissorsCount").textContent = counts.scissors;
+
+  if(tournamentActive && !tournamentOver && !gameLocked && creatures.length>0){
+    if(counts.rock===creatures.length){ tournamentPointFor('rock'); }
+    if(counts.paper===creatures.length){ tournamentPointFor('paper'); }
+    if(counts.scissors===creatures.length){ tournamentPointFor('scissors'); }
+  }
+
+  document.getElementById("tRock").textContent = tournament.rock;
+  document.getElementById("tPaper").textContent = tournament.paper;
+  document.getElementById("tScissors").textContent = tournament.scissors;
+}
+
+function tournamentPointFor(type){
+  gameLocked=true;
+  showWinnerAnimation(type);
+
+  setTimeout(()=>{
+    if(tournamentActive){ 
+      tournament[type]++;
+      if(tournament[type]>=winningScore){
+        tournamentOver=true;
+        showTournamentVictory(type);
+      } else {
+        resetGame(false);
+        gameLocked=false;
+      }
+    }
+  },2000);
+}
+
+function showWinnerAnimation(type){
+  const winnerDiv = document.getElementById("winnerAnimation");
+  winnerDiv.textContent = emojis[type] + " ניצח!";
+  winnerDiv.style.display = "block";
+  winnerDiv.style.animation = "zoom 2s ease-in-out";
+  setTimeout(()=>{ winnerDiv.style.display="none"; }, 2000);
+}
+
+function showTournamentVictory(type){
+  const centerX = window.innerWidth/2;
+  const centerY = window.innerHeight/2;
+  const winnerCreatures = creatures.filter(c=>c.type===type);
+  winnerCreatures.forEach(c=>{ c.x=centerX; c.y=centerY; c.updatePos(); });
+
+  for(let i=0;i<30;i++){
+    const fire = document.createElement("div");
+    fire.className="firework";
+    fire.style.background=["red","yellow","blue","green","purple"][Math.floor(Math.random()*5)];
+    fire.style.left=centerX+"px";
+    fire.style.top=centerY+"px";
+    document.body.appendChild(fire);
+
+    let angle = Math.random()*2*Math.PI;
+    let speed = Math.random()*5+2;
+    let vx=Math.cos(angle)*speed;
+    let vy=Math.sin(angle)*speed;
+    let lifetime=1000+Math.random()*1000;
+
+    const anim = setInterval(()=>{
+      const rect=fire.getBoundingClientRect();
+      fire.style.left=rect.left+vx+"px";
+      fire.style.top=rect.top+vy+"px";
+      fire.style.opacity-=0.02;
+      lifetime-=16;
+      if(lifetime<=0){ fire.remove(); clearInterval(anim); }
+    },16);
+  }
+
+  setTimeout(()=>{
+    resetTournament();
+    resetGame();
+    gameLocked=false;
+  },3000);
+}
+
+function checkCollisions(){
+  for(let i=0;i<creatures.length;i++){
+    for(let j=i+1;j<creatures.length;j++){
+      let a=creatures[i], b=creatures[j];
+      let dx=a.x-b.x, dy=a.y-b.y;
+      if(Math.sqrt(dx*dx+dy*dy)<30){
+        if(canBeat(a.type,b.type)){ b.type=a.type; b.el.textContent=emojis[a.type]; }
+        else if(canBeat(b.type,a.type)){ a.type=b.type; a.el.textContent=emojis[b.type]; }
+      }
+    }
+  }
+}
+
+function addCreature(type){ creatures.push(new Creature(type)); }
+function removeCreature(type){
+  for(let i=0;i<creatures.length;i++){
+    if(creatures[i].type===type){
+      creatures[i].el.remove();
+      creatures.splice(i,1);
+      break;
+    }
+  }
+}
+
+function resetGame(resetTournamentFlag=true){
+  creatures.forEach(c=>c.el.remove());
+  creatures.length=0;
+  if(resetTournamentFlag) tournamentOver=false;
+  for(let i=0;i<initialCount;i++){
+    addCreature("rock");
+    addCreature("paper");
+    addCreature("scissors");
+  }
+}
+
+function resetTournament(){
+  tournament = {rock:0, paper:0, scissors:0};
+  tournamentOver=false;
+  document.getElementById("tRock").textContent = 0;
+  document.getElementById("tPaper").textContent = 0;
+  document.getElementById("tScissors").textContent = 0;
+}
+
+function toggleTournament(){
+  tournamentActive=!tournamentActive;
+  document.getElementById("toggleTournamentBtn").textContent = tournamentActive ? "הפסק טורניר" : "הפעל טורניר";
+  resetGame(false);
+  tournamentOver=false;
+}
+
+function loop(){
+  creatures.forEach(c=>c.move());
+  checkCollisions();
+  updateStats();
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+loop();
+</script>
+
+<style>
+@keyframes zoom {
+  0% { transform:translate(-50%,-50%) scale(0.5); opacity:0; }
+  50% { transform:translate(-50%,-50%) scale(1.5); opacity:1; }
+  100% { transform:translate(-50%,-50%) scale(1); opacity:0; }
+}
+</style>
+</body>
+</html>
